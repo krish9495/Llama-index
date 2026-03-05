@@ -6,10 +6,7 @@ import os
 from llama_index.core import StorageContext, load_index_from_storage, Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
-# Use local embedding model
-Settings.embed_model = HuggingFaceEmbedding(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
+print("Starting FastAPI app initialization...")
 
 app = FastAPI(
     title="LlamaIndex Query API",
@@ -26,19 +23,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Lazy load index
+# Lazy load components
 retriever = None
+embedding_model_initialized = False
+
+def init_embedding_model():
+    global embedding_model_initialized
+    try:
+        print("Initializing HuggingFace embedding model...")
+        Settings.embed_model = HuggingFaceEmbedding(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
+        embedding_model_initialized = True
+        print("Embedding model initialized successfully")
+    except Exception as e:
+        print(f"Error initializing embedding model: {e}")
+        import traceback
+        traceback.print_exc()
 
 def load_index():
-    global retriever
+    global retriever, embedding_model_initialized
     try:
+        if not embedding_model_initialized:
+            init_embedding_model()
+        
+        print("Loading index from storage...")
         storage_dir = os.getenv("STORAGE_DIR", "storage")
         storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
         index = load_index_from_storage(storage_context)
         retriever = index.as_retriever(similarity_top_k=3)
+        print("Index loaded successfully")
         return True
     except Exception as e:
         print(f"Error loading index: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 class QueryRequest(BaseModel):
@@ -74,6 +93,7 @@ def query_docs(request: QueryRequest):
     
     # Load index on first request if not loaded
     if retriever is None:
+        print("First request - loading index...")
         load_index()
     
     if not retriever:
@@ -83,6 +103,7 @@ def query_docs(request: QueryRequest):
         raise HTTPException(status_code=400, detail="Question cannot be empty")
     
     try:
+        print(f"Processing query: {request.question}")
         nodes = retriever.retrieve(request.question)
         context = "\n".join([node.node.text for node in nodes])
         
@@ -92,4 +113,9 @@ def query_docs(request: QueryRequest):
             success=True
         )
     except Exception as e:
+        print(f"Query error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+print("FastAPI app initialized successfully")
