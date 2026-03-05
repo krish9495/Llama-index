@@ -4,3 +4,4 @@ llama-index-core>=0.9
 llama-index-embeddings-huggingface>=0.1
 pydantic>=2.0
 python-dotenv>=1.0
+torch
