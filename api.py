@@ -26,15 +26,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load stored index
-try:
-    storage_dir = os.getenv("STORAGE_DIR", "storage")
-    storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
-    index = load_index_from_storage(storage_context)
-    retriever = index.as_retriever(similarity_top_k=3)
-except Exception as e:
-    print(f"Error loading index: {e}")
-    retriever = None
+# Lazy load index
+retriever = None
+
+def load_index():
+    global retriever
+    try:
+        storage_dir = os.getenv("STORAGE_DIR", "storage")
+        storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
+        index = load_index_from_storage(storage_context)
+        retriever = index.as_retriever(similarity_top_k=3)
+        return True
+    except Exception as e:
+        print(f"Error loading index: {e}")
+        return False
 
 class QueryRequest(BaseModel):
     question: str
@@ -45,17 +50,34 @@ class QueryResponse(BaseModel):
     success: bool
 
 
+@app.get("/")
+def root():
+    """Root endpoint"""
+    return {"message": "LlamaIndex Query API is running", "status": "ok"}
+
+
 @app.get("/health")
 def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "LlamaIndex Query API"}
+    index_loaded = retriever is not None
+    return {
+        "status": "healthy",
+        "service": "LlamaIndex Query API",
+        "index_loaded": index_loaded
+    }
 
 
 @app.post("/query", response_model=QueryResponse)
 def query_docs(request: QueryRequest):
     """Query indexed documents based on the provided question"""
+    global retriever
+    
+    # Load index on first request if not loaded
+    if retriever is None:
+        load_index()
+    
     if not retriever:
-        raise HTTPException(status_code=500, detail="Index not loaded")
+        raise HTTPException(status_code=503, detail="Index not loaded. Please check server logs.")
     
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
